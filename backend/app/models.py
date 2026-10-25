@@ -71,3 +71,21 @@ class CADModel(Base):
     name = Column(String(200))
     glb_path = Column(String(500))
     original_format = Column(String(20))
+    from sqlalchemy import Index
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String(100)) # incident.create, machine.read, sop.ask
+    resource = Column(String(200))
+    ip = Column(String(50))
+    meta = Column(JSON, default={})
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+Index('idx_audit_ts', AuditLog.timestamp)
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    id = Column(Integer, primary_key=True)
+    role = Column(String(20), unique=True)
+    permissions = Column(JSON) # {"machines:read":True, "incidents:ack":True}
