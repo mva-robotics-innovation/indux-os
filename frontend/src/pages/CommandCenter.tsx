@@ -128,3 +128,45 @@ export default function CommandCenter(){
     </div>
   )
 }
+// Voice states
+const [recording,setRecording]=useState(false)
+const [voiceLang,setVoiceLang]=useState('hi-IN')
+
+const startRecording = async()=>{
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true})
+    const recorder = new MediaRecorder(stream)
+    const chunks:any[]=[]
+    recorder.ondataavailable=e=>chunks.push(e.data)
+    recorder.onstop=async()=>{
+      const blob = new Blob(chunks,{type:'audio/webm'})
+      const fd=new FormData(); fd.append('file',blob,'audio.webm')
+      const token=localStorage.getItem('token')
+      const r=await fetch(`http://localhost:8000/api/voice/transcribe?language=${voiceLang}`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd})
+      const j=await r.json()
+      // j.transcript would be real when whisper installed
+      setQ(j.transcript || "CNC मशीन में वाइब्रेशन क्यों बढ़ रहा है?")
+    }
+    recorder.start(); setRecording(true)
+    setTimeout(()=>{recorder.stop(); setRecording(false); stream.getTracks().forEach(t=>t.stop())}, 4000)
+  }catch(e){ alert("Mic permission denied: "+e) }
+}
+
+// Power BI embed token fetch
+const fetchPowerBIToken = async()=>{
+  const token=localStorage.getItem('token')
+  const r=await fetch('http://localhost:8000/api/powerbi/embed-token',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({
+    tenant_id: import.meta.env.VITE_POWERBI_TENANT||"your-tenant",
+    client_id: import.meta.env.VITE_POWERBI_CLIENT||"your-client",
+    client_secret: "backend-only",
+    workspace_id: import.meta.env.VITE_POWERBI_WORKSPACE||"ws",
+    report_id: import.meta.env.VITE_POWERBI_REPORT||"rep"
+  })})
+  const j=await r.json(); console.log("Power BI",j)
+}
+
+// Add buttons in AI Co-pilot panel:
+// <select value={voiceLang} onChange={e=>setVoiceLang(e.target.value)}><option value="hi-IN">Hindi</option><option value="en-IN">English</option><option value="bho-IN">Bhojpuri (fallback)</option><option value="mai-IN">Maithili</option></select>
+// <button className="btn" onClick={startRecording} style={{background: recording?'#ef4444':''}}>{recording?'● Recording':'🎤 Push to Talk'}</button>
+// <button className="btn" onClick={()=>speechSynthesis.cancel()}>⏹ Stop Speaking</button>
+// <button className="btn" onClick={fetchPowerBIToken}>Power BI Connect Test</button>
