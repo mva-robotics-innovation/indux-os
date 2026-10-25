@@ -27,3 +27,21 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.username==username).first()
     if not user: raise HTTPException(401, "User not found")
     return user
+from fastapi import HTTPException
+
+ROLE_PERMISSIONS = {
+    "viewer": ["machines:read","analytics:read","sop:read"],
+    "operator": ["machines:read","incidents:create","sop:read","telemetry:read"],
+    "technician": ["machines:read","machines:write","incidents:*","sop:*","maintenance:*"],
+    "supervisor": ["machines:*","incidents:ack","incidents:assign","reports:read"],
+    "admin": ["*"],
+    "auditor": ["audit:read","machines:read","incidents:read"]
+}
+
+def require_permission(perm: str):
+    def checker(user = Depends(get_current_user)):
+        role_perms = ROLE_PERMISSIONS.get(user.role, [])
+        if "*" in role_perms: return user
+        if perm in role_perms or f"{perm.split(':')[0]}:*" in role_perms: return user
+        raise HTTPException(403, f"Role {user.role} missing permission {perm}")
+    return checker
