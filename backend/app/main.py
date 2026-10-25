@@ -24,6 +24,9 @@ app.include_router(telemetry.router)
 app.include_router(documents.router)
 app.include_router(cad.router)
 app.include_router(vision.router)
-
+from .routers import voice, powerbi, industrial
+app.include_router(voice.router)
+app.include_router(powerbi.router)
+app.include_router(industrial.router)
 @app.get("/health")
 def health(): return {"status":"ok","version":"12.0.0"}
