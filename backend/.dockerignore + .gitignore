@@ -1,0 +1,6 @@
+__pycache__
+.env
+uploads/
+cad_store/
+*.pt
+*.onnx
