@@ -12,6 +12,9 @@ export default function CommandCenter(){
   const [aiAnswer,setAiAnswer]=useState("सह-पायलट: लाइन-3 पर मोटर तापमान 2.4°C अधिक पाया गया। सुझाव: कूलिंग पंप की गति 15% बढ़ाएं • रोकथाम: अगले 2 घंटे में बेयरिंग निरीक्षण निर्धारित • अनुमान: डाउनटाइम जोखिम कम → 12% से 3%")
   const [q,setQ]=useState("")
   const [incidents,setIncidents]=useState<any[]>([])
+  // Voice states — INSIDE component
+  const [recording,setRecording]=useState(false)
+  const [voiceLang,setVoiceLang]=useState('hi-IN')
 
   const fetchMachines = async()=>{
     try{
@@ -35,10 +38,16 @@ export default function CommandCenter(){
     if(!q) return
     try{
       const token=localStorage.getItem('token')
-      const r=await axios.post('http://localhost:8000/api/sop/ask',{query:q,language:'hi',top_k:5},{headers:{Authorization:`Bearer ${token}`}})
-      setAiAnswer(r.data.answer + ` (Model: ${r.data.model_used} | ${r.data.latency_ms}ms | Sources: ${r.data.citations.map((c:any)=>`Doc ${c.document_id} P${c.page}`).join(',')})`)
-      if('speechSynthesis' in window){ const u=new SpeechSynthesisUtterance(r.data.answer); u.lang='hi-IN'; speechSynthesis.speak(u) }
-    }catch{ setAiAnswer("Backend offline — local knowledge: Check bearing per SOP Page 47, vibration threshold 4.5 mm/s") }
+      const r=await axios.post('http://localhost:8000/api/sop/ask',{query:q,language: voiceLang.split('-')[0], top_k:5},{headers:{Authorization:`Bearer ${token}`}})
+      setAiAnswer(r.data.answer + ` (Model: ${r.data.model_used} | ${r.data.latency_ms}ms | Sources: ${r.data.citations?.map((c:any)=>`Doc ${c.document_id} P${c.page}`).join(',')})`)
+      if('speechSynthesis' in window){ 
+        const u=new SpeechSynthesisUtterance(r.data.answer); 
+        u.lang=voiceLang; 
+        speechSynthesis.speak(u) 
+      }
+    }catch{ 
+      setAiAnswer("Backend offline — local knowledge: Check bearing per SOP Page 47, vibration threshold 4.5 mm/s") 
+    }
   }
 
   const createIncident = async()=>{
@@ -46,6 +55,38 @@ export default function CommandCenter(){
     const r=await axios.post('http://localhost:8000/api/incidents',{severity:'high',location:'Sriperumbudur',asset:'MOTOR-12',description:'Motor temp 2.4C high detected by AI Co-pilot'},{headers:{Authorization:`Bearer ${token}`}})
     setIncidents([r.data, ...incidents])
     alert(`Incident #${r.data.id} created — notification_log: ${JSON.stringify(r.data.notification_log)}`)
+  }
+
+  const startRecording = async()=>{
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true})
+      const recorder = new MediaRecorder(stream)
+      const chunks:any[]=[]
+      recorder.ondataavailable=e=>chunks.push(e.data)
+      recorder.onstop=async()=>{
+        const blob = new Blob(chunks,{type:'audio/webm'})
+        const fd=new FormData(); fd.append('file',blob,'audio.webm')
+        const token=localStorage.getItem('token')
+        const r=await fetch(`http://localhost:8000/api/voice/transcribe?language=${voiceLang}`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd})
+        const j=await r.json()
+        setQ(j.transcript || j.text || "CNC मशीन में वाइब्रेशन क्यों बढ़ रहा है?")
+      }
+      recorder.start(); setRecording(true)
+      setTimeout(()=>{recorder.stop(); setRecording(false); stream.getTracks().forEach(t=>t.stop())}, 4000)
+    }catch(e){ alert("Mic permission denied: "+String(e)) }
+  }
+
+  const fetchPowerBIToken = async()=>{
+    const token=localStorage.getItem('token')
+    const r=await fetch('http://localhost:8000/api/powerbi/embed-token',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({
+      tenant_id: import.meta.env.VITE_POWERBI_TENANT||"your-tenant",
+      client_id: import.meta.env.VITE_POWERBI_CLIENT||"your-client",
+      client_secret: "backend-only",
+      workspace_id: import.meta.env.VITE_POWERBI_WORKSPACE||"ws",
+      report_id: import.meta.env.VITE_POWERBI_REPORT||"rep"
+    })})
+    const j=await r.json(); console.log("Power BI",j)
+    alert("Power BI token: "+ JSON.stringify(j).slice(0,200))
   }
 
   const chartOpt = {
@@ -87,8 +128,29 @@ export default function CommandCenter(){
           <div className="card">
             <div style={{display:'flex',justifyContent:'space-between'}}><b>✨ AI Co-pilot</b><span style={{background:'#22d3ee',color:'#000',padding:'2px 8px',borderRadius:6,fontSize:10}}>AI ACTIVE</span></div>
             <div style={{background:'#0a1930',borderRadius:8,padding:8,marginTop:8,fontSize:12}}>{aiAnswer}</div>
-            <div style={{display:'flex',gap:4,marginTop:8}}><button className="btn" style={{background:'#22d3ee',color:'#000'}} onClick={createIncident}>Apply Suggestion</button><button className="btn">Dismiss</button><button className="btn">Create Work Order</button></div>
-            <div style={{display:'flex',gap:4,marginTop:8}}><input value={q} onChange={e=>setQ(e.target.value)} placeholder="संदेश लिखें... / Ask follow-up" style={{flex:1,background:'#0a1930',border:'1px solid #1e3a52',color:'white',borderRadius:6,padding:6}}/><button className="btn" onClick={askAI}>→</button></div>
+            
+            <div style={{display:'flex',gap:4,marginTop:8, flexWrap:'wrap'}}>
+              <select value={voiceLang} onChange={e=>setVoiceLang(e.target.value)} style={{background:'#0a1930',color:'white',border:'1px solid #1e3a52',borderRadius:6}}>
+                <option value="hi-IN">Hindi</option>
+                <option value="en-IN">English</option>
+                <option value="bho-IN">Bhojpuri (fallback hi-IN)</option>
+                <option value="mai-IN">Maithili</option>
+                <option value="mag-IN">Magahi</option>
+              </select>
+              <button className="btn" onClick={startRecording} style={{background: recording?'#ef4444':'#1e3a52'}}>{recording?'● Recording 4s':'🎤 Push to Talk'}</button>
+              <button className="btn" onClick={()=>speechSynthesis.cancel()}>⏹ Stop</button>
+            </div>
+
+            <div style={{display:'flex',gap:4,marginTop:8}}>
+              <button className="btn" style={{background:'#22d3ee',color:'#000'}} onClick={createIncident}>Apply Suggestion</button>
+              <button className="btn">Dismiss</button>
+              <button className="btn">Create Work Order</button>
+              <button className="btn" onClick={fetchPowerBIToken}>Power BI Test</button>
+            </div>
+            <div style={{display:'flex',gap:4,marginTop:8}}>
+              <input value={q} onChange={e=>setQ(e.target.value)} placeholder="संदेश लिखें... / Ask follow-up" style={{flex:1,background:'#0a1930',border:'1px solid #1e3a52',color:'white',borderRadius:6,padding:6}}/>
+              <button className="btn" onClick={askAI}>→</button>
+            </div>
           </div>
           <div className="card" style={{marginTop:8}}>
             <b>Power BI Analytics — Daily Output Last 7 Days</b>
@@ -128,45 +190,3 @@ export default function CommandCenter(){
     </div>
   )
 }
-// Voice states
-const [recording,setRecording]=useState(false)
-const [voiceLang,setVoiceLang]=useState('hi-IN')
-
-const startRecording = async()=>{
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({audio:true})
-    const recorder = new MediaRecorder(stream)
-    const chunks:any[]=[]
-    recorder.ondataavailable=e=>chunks.push(e.data)
-    recorder.onstop=async()=>{
-      const blob = new Blob(chunks,{type:'audio/webm'})
-      const fd=new FormData(); fd.append('file',blob,'audio.webm')
-      const token=localStorage.getItem('token')
-      const r=await fetch(`http://localhost:8000/api/voice/transcribe?language=${voiceLang}`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd})
-      const j=await r.json()
-      // j.transcript would be real when whisper installed
-      setQ(j.transcript || "CNC मशीन में वाइब्रेशन क्यों बढ़ रहा है?")
-    }
-    recorder.start(); setRecording(true)
-    setTimeout(()=>{recorder.stop(); setRecording(false); stream.getTracks().forEach(t=>t.stop())}, 4000)
-  }catch(e){ alert("Mic permission denied: "+e) }
-}
-
-// Power BI embed token fetch
-const fetchPowerBIToken = async()=>{
-  const token=localStorage.getItem('token')
-  const r=await fetch('http://localhost:8000/api/powerbi/embed-token',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({
-    tenant_id: import.meta.env.VITE_POWERBI_TENANT||"your-tenant",
-    client_id: import.meta.env.VITE_POWERBI_CLIENT||"your-client",
-    client_secret: "backend-only",
-    workspace_id: import.meta.env.VITE_POWERBI_WORKSPACE||"ws",
-    report_id: import.meta.env.VITE_POWERBI_REPORT||"rep"
-  })})
-  const j=await r.json(); console.log("Power BI",j)
-}
-
-// Add buttons in AI Co-pilot panel:
-// <select value={voiceLang} onChange={e=>setVoiceLang(e.target.value)}><option value="hi-IN">Hindi</option><option value="en-IN">English</option><option value="bho-IN">Bhojpuri (fallback)</option><option value="mai-IN">Maithili</option></select>
-// <button className="btn" onClick={startRecording} style={{background: recording?'#ef4444':''}}>{recording?'● Recording':'🎤 Push to Talk'}</button>
-// <button className="btn" onClick={()=>speechSynthesis.cancel()}>⏹ Stop Speaking</button>
-// <button className="btn" onClick={fetchPowerBIToken}>Power BI Connect Test</button>
