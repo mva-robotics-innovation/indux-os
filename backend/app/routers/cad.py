@@ -23,3 +23,26 @@ def upload_cad(file: UploadFile = File(...), db: Session = Depends(get_db), user
 @router.get("")
 def list_cad(db: Session = Depends(get_db), user=Depends(get_current_user)):
     return db.query(CADModel).all()
+    # Add to existing cad.py
+from pydantic import BaseModel
+
+class SimulationReq(BaseModel):
+    model_id: int
+    solver: str="openfoam" # or calculix, ansys
+    params: dict = {}
+
+@router.post("/simulate")
+def simulate(req: SimulationReq, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    model = db.query(CADModel).filter(CADModel.id==req.model_id).first()
+    if not model: raise HTTPException(404, "Model not found")
+    # Real: queue to Redis/Celery worker with resource limits
+    return {
+        "job_id": f"sim-{uuid.uuid4()}",
+        "status":"queued",
+        "model": model.name,
+        "solver": req.solver,
+        "params": req.params,
+        "logs_url": "/api/cad/sim/logs/{job_id}",
+        "results_url": "/api/cad/sim/results/{job_id}",
+        "note":"Real solver required: OpenFOAM, CalculiX, or vendor API. Job runs in background worker with auth and audit."
+    }
